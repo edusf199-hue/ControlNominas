@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Nóminas - Calendario mensual</title>
+
+<style>
+body { font-family: Arial; background:#f3f4f6; margin:20px }
+.card { background:#fff; padding:15px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.1); margin-bottom:15px }
+
+.grid { display:grid; grid-template-columns: repeat(7,1fr); gap:6px }
+.header { display:grid; grid-template-columns: repeat(7,1fr); font-weight:bold; text-align:center }
+
+.day { border:1px solid #ddd; border-radius:8px; padding:6px; min-height:140px; cursor:pointer }
+.worked { background:#dcfce7 }
+.incomplete { background:#fee2e2 }
+.weekend { background:#fde2e2 }
+.today { outline:3px solid #2563eb }
+.empty { background:#f9fafb }
+
+small { font-size:11px }
+.tag { font-weight:bold; font-size:11px }
+.ext { color:#065f46 }
+.fue { color:#92400e }
+
+select, input { padding:6px; width:100%; margin-top:4px }
+
+button {
+  padding:6px 10px;
+  border:none;
+  border-radius:8px;
+  background:#2563eb;
+  color:#fff;
+  cursor:pointer;
+}
+
+button.danger { background:#dc2626 }
+
+.summary {
+  display:grid;
+  grid-template-columns: repeat(5,1fr);
+  gap:10px;
+}
+
+.summary div {
+  background:#f9fafb;
+  padding:10px;
+  border-radius:8px;
+}
+
+table {
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+}
+
+th, td {
+  border:1px solid #ddd;
+  padding:6px;
+  font-size:12px;
+}
+
+th { background:#eee }
+</style>
+</head>
+
+<body>
+
+<h2>📅 Control mensual por trabajador</h2>
+
+<div class="card">
+  <select id="trabajador"></select>
+  <input type="month" id="mes">
+  <button onclick="exportarPDF()">Exportar PDF</button>
+
+  <!-- Gestión trabajadores -->
+  <div style="margin-top:10px">
+    <input id="nuevoTrabajador" placeholder="Nuevo trabajador">
+    <button onclick="addTrabajador()">Añadir</button>
+    <button class="danger" onclick="delTrabajador()">Eliminar trabajador</button>
+  </div>
+</div>
+
+<div class="card">
+  <h3>💶 Precios por trabajador</h3>
+  <div class="grid" style="grid-template-columns: repeat(4,1fr)">
+    <input id="pExt" type="number" step="0.01" placeholder="€/día EXT">
+    <input id="pFue" type="number" step="0.01" placeholder="€/día FUE">
+    <input id="pExtra" type="number" step="0.01" placeholder="€/h extra">
+    <input id="pViaje" type="number" step="0.01" placeholder="€/h viaje">
+  </div>
+  <button style="margin-top:8px" onclick="guardarPrecios()">Guardar precios</button>
+</div>
+
+<div class="card">
+  <div class="header">
+    <div>L</div><div>M</div><div>X</div><div>J</div><div>V</div><div>S</div><div>D</div>
+  </div>
+  <div class="grid" id="calendario"></div>
+</div>
+
+<div class="card">
+  <h3>Resumen mensual</h3>
+  <div class="summary" id="resumen"></div>
+
+  <button onclick="toggleDetalle()">Ver detalle diario</button>
+  <div id="detalle" style="display:none"></div>
+</div>
+
+<!-- MODAL -->
+<div id="modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); align-items:center; justify-content:center">
+  <div style="background:#fff; padding:15px; border-radius:10px; width:320px">
+    <h3 id="modalFecha"></h3>
+
+    <label>Horas totales</label>
+    <input type="number" id="mHoras" step="0.5" min="0" max="24">
+
+    <label>Horas viaje</label>
+    <input type="number" id="mViaje" step="0.5" min="0">
+
+    <label>Ubicación</label>
+    <select id="mUbic">
+      <option>Extremadura</option>
+      <option>Fuera</option>
+    </select>
+
+    <button onclick="guardarDia()">Guardar</button>
+    <button class="danger" onclick="cerrarModal()">Cancelar</button>
+  </div>
+</div>
+
+<script>
+// ===== TRABAJADORES BASE =====
+const TRABAJADORES_BASE=[
+"Adonis Fernando Vargas Cornelio","Amaya Ventura, Sergio","Barbero González, Pedro Manuel",
+"antonio soriano","Borrallo Alvarez, Roberto G.","Escalera González, Antonio",
+"Fernández Díaz, Cristian","García Lucas, Cristian","Ideas Ferrera, Joaquín",
+"Kokhlikya, Gervog","López Boza, Jonathan","Lozano Bleda, Juan Antonio",
+"Macías Gómez, Pedro","Méndez García, Daniel","Olivera de la Rosa, Nicolás",
+"Panizo Narjalizo, Carlos","Rodríguez Rodríguez, Diosdado",
+"Borrallo Calderon, Guillermo","Vázquez Calero, Francisco"
+]
+
+let TRABAJADORES = JSON.parse(localStorage.getItem("trabajadores_custom")||"null")
+if(!Array.isArray(TRABAJADORES)) TRABAJADORES=[...TRABAJADORES_BASE]
+
+// ===== TARIFAS POR DEFECTO =====
+const TARIFAS={
+  Extremadura:{dia:48.48, extra:7, viaje:7},
+  Fuera:{dia:56.56, extra:8, viaje:8}
+}
+
+// ===== PRECIOS POR TRABAJADOR =====
+let PRECIOS = JSON.parse(localStorage.getItem("precios_trabajador")||"{}")
+
+let data=JSON.parse(localStorage.getItem("nominas_cal")||"{}")
+let diaActivo=null
+
+function save(){ localStorage.setItem("nominas_cal",JSON.stringify(data)) }
+function saveTrabajadores(){ localStorage.setItem("trabajadores_custom",JSON.stringify(TRABAJADORES)) }
+function savePrecios(){ localStorage.setItem("precios_trabajador",JSON.stringify(PRECIOS)) }
+
+function renderTrabajadores(){
+  trabajador.innerHTML=TRABAJADORES.map(t=>`<option>${t}</option>`).join("")
+}
+
+renderTrabajadores()
+mes.value=new Date().toISOString().slice(0,7)
+
+// ===== PRECIOS UI =====
+function cargarPrecios(){
+  let p=PRECIOS[trabajador.value]||{}
+  pExt.value=p.ext||""
+  pFue.value=p.fue||""
+  pExtra.value=p.extra||""
+  pViaje.value=p.viaje||""
+}
+
+function guardarPrecios(){
+  PRECIOS[trabajador.value]={
+    ext:+pExt.value||null,
+    fue:+pFue.value||null,
+    extra:+pExtra.value||null,
+    viaje:+pViaje.value||null
+  }
+  savePrecios()
+  alert("Precios guardados")
+}
+
+// ===== CALENDARIO =====
+function buildCalendar(){
+  calendario.innerHTML=""
+  let [y,m]=mes.value.split("-").map(Number)
+  let first=new Date(y,m-1,1)
+  let start=(first.getDay()+6)%7
+  let days=new Date(y,m,0).getDate()
+  let t=trabajador.value
+  if(!data[t]) data[t]={}
+
+  for(let i=0;i<start;i++) calendario.innerHTML+=`<div></div>`
+
+  for(let d=1;d<=days;d++){
+    let date=`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`
+    let info=data[t][date]
+    let wd=new Date(y,m-1,d).getDay()
+
+    let cls="day empty"
+    if(wd==0||wd==6) cls="day weekend"
+    if(info) cls=info.h<8?"day incomplete":"day worked"
+
+    let txt=""
+    if(info){
+      let partes=[]
+      if(info.v>0) partes.push(`${info.v}h viaje`)
+      if(info.extra>0) partes.push(`${info.extra}h extras`)
+      txt=`${info.h} h<br><small>${partes.join(" · ")}</small><br><small><b>€ ${info.total.toFixed(2)}</b></small>`
+    }
+
+    calendario.innerHTML+=`<div class="${cls}" onclick="openModal('${date}')"><b>${d}</b><br>${txt}</div>`
+  }
+  calcResumen()
+}
+
+// ===== MODAL / CÁLCULO =====
+function openModal(d){
+  diaActivo=d
+  modalFecha.textContent=d
+  let info=data[trabajador.value][d]||{}
+  mHoras.value=info.h||""
+  mViaje.value=info.v||""
+  mUbic.value=info.u||"Extremadura"
+  modal.style.display="flex"
+}
+
+function cerrarModal(){ modal.style.display="none" }
+
+function getPrecio(u){
+  let p=PRECIOS[trabajador.value]||{}
+  return {
+    dia: u==="Extremadura" ? (p.ext ?? TARIFAS.Extremadura.dia) : (p.fue ?? TARIFAS.Fuera.dia),
+    extra: p.extra ?? TARIFAS[u].extra,
+    viaje: p.viaje ?? TARIFAS[u].viaje
+  }
+}
+
+function guardarDia(){
+  let h=+mHoras.value||0
+  let v=+mViaje.value||0
+  if(h>24||v>h) return alert("Horas incorrectas")
+
+  let u=mUbic.value
+  let trabajo=h-v
+  let extra=Math.max(0,trabajo-8)
+  let base=Math.min(trabajo,8)
+  let p=getPrecio(u)
+
+  let total=(base>=8?p.dia:base*(p.dia/8))+extra*p.extra+v*p.viaje
+
+  data[trabajador.value][diaActivo]={h,v,u,extra,total:+total.toFixed(2)}
+  save()
+  cerrarModal()
+  buildCalendar()
+}
+
+// ===== RESUMEN / DETALLE =====
+function calcResumen(){
+  let t=trabajador.value,sum=0,h=0,v=0,e=0,rows=""
+  Object.entries(data[t]||{}).forEach(([f,d])=>{
+    sum+=d.total; h+=d.h; v+=d.v; e+=d.extra||0
+    rows+=`<tr><td>${f}</td><td>${d.u}</td><td>${d.h}</td><td>${d.v}</td><td>${d.extra}</td><td>${d.total.toFixed(2)}</td></tr>`
+  })
+
+  resumen.innerHTML=`
+    <div><b>Días</b><br>${Object.keys(data[t]||{}).length}</div>
+    <div><b>Horas</b><br>${h}</div>
+    <div><b>Viaje</b><br>${v}</div>
+    <div><b>Extras</b><br>${e}</div>
+    <div><b>Total €</b><br>${sum.toFixed(2)}</div>
+  `
+
+  detalle.innerHTML=`
+    <table>
+      <tr><th>Fecha</th><th>Ubicación</th><th>Horas</th><th>Viaje</th><th>Extras</th><th>Total €</th></tr>
+      ${rows}
+      <tr><th colspan="5">TOTAL MES</th><th>${sum.toFixed(2)}</th></tr>
+    </table>`
+}
+
+function toggleDetalle(){
+  detalle.style.display = detalle.style.display==="none"?"block":"none"
+}
+
+// ===== PDF (ESTABLE) =====
+function exportarPDF(){
+  const tabla = detalle.querySelector("table")
+  if(!tabla) return alert("No hay detalle diario")
+
+  const w = window.open("", "_blank")
+  w.document.write(`
+    <html><head><title>Nómina</title>
+    <style>
+      body{font-family:Arial;padding:20px}
+      table{width:100%;border-collapse:collapse}
+      th,td{border:1px solid #000;padding:6px;text-align:center}
+      th{background:#eee}
+    </style></head>
+    <body>
+      <h2>Nómina mensual</h2>
+      <p><b>Trabajador:</b> ${trabajador.value}<br><b>Mes:</b> ${mes.value}</p>
+      ${tabla.outerHTML}
+    </body></html>
+  `)
+  w.document.close(); w.focus(); w.print(); w.close()
+}
+
+// ===== GESTIÓN TRABAJADORES =====
+function addTrabajador(){
+  const n=nuevoTrabajador.value.trim()
+  if(!n||TRABAJADORES.includes(n)) return
+  TRABAJADORES.push(n); saveTrabajadores(); renderTrabajadores()
+  trabajador.value=n; buildCalendar()
+}
+
+function delTrabajador(){
+  const t=trabajador.value
+  if(!confirm(`¿Eliminar ${t} y todos sus datos?`)) return
+  delete data[t]; save()
+  TRABAJADORES=TRABAJADORES.filter(x=>x!==t)
+  saveTrabajadores(); renderTrabajadores(); buildCalendar()
+}
+
+trabajador.onchange=()=>{cargarPrecios();buildCalendar()}
+mes.onchange=buildCalendar
+cargarPrecios()
+buildCalendar()
+</script>
+
+</body>
+</html>
