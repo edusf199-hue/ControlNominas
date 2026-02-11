@@ -65,81 +65,17 @@ th { background:#eee }
 
 <body>
 
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<title>Nóminas - Calendario mensual</title>
-
-<style>
-body { font-family: Arial; background:#f3f4f6; margin:20px }
-.card { background:#fff; padding:15px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.1); margin-bottom:15px }
-
-.grid { display:grid; grid-template-columns: repeat(7,1fr); gap:6px }
-.header { display:grid; grid-template-columns: repeat(7,1fr); font-weight:bold; text-align:center }
-
-.day { border:1px solid #ddd; border-radius:8px; padding:6px; min-height:150px; cursor:pointer }
-.worked { background:#dcfce7 }
-.incomplete { background:#fee2e2 }
-.weekend { background:#fde2e2 }
-.empty { background:#f9fafb }
-
-small { font-size:11px }
-.tag { font-weight:bold; font-size:11px }
-.ext { color:#065f46 }
-.fue { color:#92400e }
-.pen { color:#b91c1c; font-weight:bold }
-
-select, input { padding:6px; width:100%; margin-top:4px }
-
-button {
-  padding:6px 10px;
-  border:none;
-  border-radius:8px;
-  background:#2563eb;
-  color:#fff;
-  cursor:pointer;
-}
-
-button.gray { background:#6b7280 }
-button.danger { background:#dc2626 }
-
-.summary {
-  display:grid;
-  grid-template-columns: repeat(5,1fr);
-  gap:10px;
-}
-
-.summary div {
-  background:#f9fafb;
-  padding:10px;
-  border-radius:8px;
-}
-
-table {
-  width:100%;
-  border-collapse:collapse;
-  margin-top:10px;
-}
-
-th, td {
-  border:1px solid #ddd;
-  padding:6px;
-  font-size:12px;
-}
-
-th { background:#eee }
-</style>
-</head>
-
-<body>
-
 <h2>📅 Control mensual por trabajador</h2>
 
 <div class="card">
   <select id="trabajador"></select>
   <input type="month" id="mes">
   <button onclick="exportarPDF()">Exportar PDF</button>
+
+  <div style="margin-top:10px">
+    <button class="gray" onclick="exportarDatos()">Exportar datos</button>
+    <button class="gray" onclick="importarDatos()">Importar datos</button>
+  </div>
 
   <div style="margin-top:10px">
     <input id="nuevoTrabajador" placeholder="Nuevo trabajador">
@@ -197,7 +133,56 @@ th { background:#eee }
   </div>
 </div>
 
+<input type="file" id="fileImport" accept="application/json" style="display:none">
+
 <script>
+// ================= EXPORT / IMPORT =================
+function exportarDatos(){
+  const datos = {
+    nominas_cal: localStorage.getItem("nominas_cal"),
+    precios_trabajador: localStorage.getItem("precios_trabajador"),
+    trabajadores_custom: localStorage.getItem("trabajadores_custom")
+  };
+
+  const blob = new Blob(
+    [JSON.stringify(datos, null, 2)],
+    { type: "application/json" }
+  );
+
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "backup_nominas.json";
+  a.click();
+}
+
+function importarDatos(){
+  if(!confirm("Esto sobrescribirá los datos actuales. ¿Continuar?")) return;
+  document.getElementById("fileImport").click();
+}
+
+document.getElementById("fileImport").onchange = e => {
+  const file = e.target.files[0];
+  if(!file) return;
+
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const datos = JSON.parse(ev.target.result);
+
+      if(datos.nominas_cal) localStorage.setItem("nominas_cal", datos.nominas_cal);
+      if(datos.precios_trabajador) localStorage.setItem("precios_trabajador", datos.precios_trabajador);
+      if(datos.trabajadores_custom) localStorage.setItem("trabajadores_custom", datos.trabajadores_custom);
+
+      alert("Datos importados correctamente. Se recargará la página.");
+      location.reload();
+    } catch {
+      alert("Archivo no válido");
+    }
+  };
+  reader.readAsText(file);
+};
+// ================= FIN EXPORT / IMPORT =================
+
 // ===== BASE =====
 const TRABAJADORES_BASE=[
 "Adonis Fernando Vargas Cornelio","Amaya Ventura, Sergio","Barbero González, Pedro Manuel",
@@ -235,6 +220,19 @@ mes.value=new Date().toISOString().slice(0,7);
 
 // ===== PDF =====
 function exportarPDF(){
+  const t = trabajador.value;
+  let horasTotales = 0;
+  let horasViaje = 0;
+  let horasExtra = 0;
+  let totalEuros = 0;
+
+  Object.values(data[t] || {}).forEach(d => {
+    horasTotales += d.h || 0;
+    horasViaje += d.v || 0;
+    horasExtra += d.extra || 0;
+    totalEuros += d.total || 0;
+  });
+
   const w = window.open("", "_blank");
 
   w.document.write(`
@@ -255,13 +253,27 @@ function exportarPDF(){
           text-align:center;
         }
         th { background:#eee }
+        .resumen {
+          margin-top:15px;
+          font-size:13px;
+        }
       </style>
     </head>
     <body>
       <h2>Nómina mensual</h2>
       <h3>Trabajador: ${trabajador.value}</h3>
       <h3>Mes: ${mes.value}</h3>
+
       ${detalle.innerHTML}
+
+      <div class="resumen">
+        <b>Resumen del mes</b><br>
+        Horas totales trabajadas: <b>${horasTotales}</b><br>
+        Horas de viaje: <b>${horasViaje}</b><br>
+        Horas extra: <b>${horasExtra}</b><br>
+        Total a percibir: <b>€ ${totalEuros.toFixed(2)}</b>
+      </div>
+
       <script>
         window.onload = () => window.print();
       <\/script>
@@ -456,4 +468,5 @@ buildCalendar();
 
 </body>
 </html>
+
 
